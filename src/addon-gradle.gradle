@@ -1,0 +1,342 @@
+import javax.swing.*
+import java.awt.Dimension
+
+defaultTasks 'showGui'
+
+apply plugin: 'war'
+apply plugin: 'groovy'
+apply plugin: 'idea'
+apply plugin: 'eclipse'
+
+repositories {
+   mavenCentral()
+
+   // since JQuery is frequently used by add-ons, include their repo here as a convenience
+   mavenRepo (name: "JQuery", url: "http://code.jquery.com") {
+        pattern = "[module]-[revision](.[classifier]).[ext]"
+   }
+   mavenRepo (name: "JQuery UI", url: "http://code.jquery.com/ui") {
+        pattern = "[revision]/[module](.[classifier]).[ext]"
+   }
+}
+
+final jsDir = 'js'
+configurations {
+   js // used to specify javascript dependencies.  These are all put in 'jsDir' when the .war is built.
+}
+
+project.convention.plugins.addoninfo = new AddOnInfo()
+
+final addonInfoFile = new File(buildDir, 'tmp/war/info.xml')
+task generateAddOnInfo {
+   afterEvaluate {
+      inputs.properties project.convention.plugins.addoninfo.properties
+      outputs.file addonInfoFile
+   }
+   doLast {
+      def addoninfo = project.convention.plugins.addoninfo
+      def props = addoninfo.properties
+      if (props.any { key, value -> value != null }) {
+         def text = '<extension version="1">\r\n'
+         props.each { key, value ->
+           if (value) {
+               def keyText = addoninfo.propNameToXmlElementName(key)
+               text += "  <$keyText>$value</$keyText>\r\n"
+           }
+         }
+         text += '</extension>'
+
+         addonInfoFile.parentFile.mkdirs()
+         addonInfoFile.text = text
+      }
+      else
+         addonInfoFile.delete()
+   }
+}
+
+war {
+   dependsOn generateAddOnInfo
+   inputs.files addonInfoFile, 'LICENSE.txt'
+
+   if (extension == 'war')
+      extension = 'addon'
+
+   // lower-case'ify the war name to simplify usage in a web browser (which is case-sensitive)
+   doFirst {
+      archiveName = war.baseName.toLowerCase() + '.' + extension
+   }
+
+   into('webapp') // put most stuff into the 'webapp' subdir
+
+   // move the stuff that the War task puts into 'WEB-INF' to 'webapp/WEB-INF'
+   copyAction.rootSpec.childSpecs.each {
+      if (it.destDir == 'WEB-INF')
+         it.into('webapp/'+it.destDir)
+   }
+
+   // include addon-info.xml in binary
+   copyAction.rootSpec.into('') {
+      from(addonInfoFile)
+   }
+
+   // include license in binary
+   from('LICENSE.txt') {
+       into 'WEB-INF'
+   }
+
+   // include javascript libraries
+   from(configurations.js) {
+       into jsDir
+   }
+}
+
+// not intended to be used directly.  This is the default task for the script.  This allows
+// the user to "double-click" on 'gradlew' and have the GUI launch.
+task showGui(description: 'Starts a graphical user interface for the build') << {
+   org.gradle.gradleplugin.userinterface.swing.standalone.BlockingApplication.launchAndBlock();
+}
+
+// Helper method to get the installation root directory of the server.  This method will either
+// return whatever is in the 'serverRootDir' property (if it's set) ...
+File getServerDir() {
+   if (!project.ext.has("serverRootDir"))
+      project.ext.set("serverRootDir", null);
+   if (project.ext.serverRootDir == null) {
+      Properties props = new Properties()
+      File optionsFile = new File('build.options')
+      if (optionsFile.exists()) {
+         optionsFile.withReader { props.load(it) }
+         project.ext.serverRootDir = props.getProperty('serverRootDir')
+      }
+
+      if (project.ext.serverRootDir == null) {
+         File dir = pickServerDir()
+         if (dir == null)
+            throw new Exception("""serverRootDir property (path to webctrl install directory) not set.
+Please set the serverRootDir property on the command line (-PserverRootDir=<dir>) or in the userHome/.gradle/gradle.properties file.""")
+
+         project.ext.serverRootDir = dir.absolutePath.replaceAll('\\\\', '/')
+         props.setProperty('serverRootDir', project.ext.serverRootDir)
+         optionsFile.withWriter { props.store(it, null) }
+      }
+   }
+   return new File(project.ext.serverRootDir)
+}
+project.ext.set("getServerDir", {getServerDir()});
+
+// Helper methods to get the directory in which to deploy webapps (add-ons).
+File getDeployLoc() { new File(getServerDir(), 'addons/'+war.baseName.toLowerCase()) }
+
+// task that deletes the .war (and exploded dir) from the webserver
+task cleanDeploy(description: 'Deletes the war from the webserver', overwrite: true, type:Delete)
+cleanDeploy.doFirst { delete deploy.destDir }
+
+// task that builds and deploys the .war to the webserver
+task deploy(description: 'Deploys the war to the webserver', type: Sync, dependsOn:war) {
+   ext.destDir = getDeployLoc()
+   doFirst {
+      println "Deploying $war.baseName to ${ext.destDir.canonicalPath}"
+   }
+   from { zipTree(war.archivePath) }
+   into { ext.destDir }
+}
+
+task signAddon(description: 'Signs the add-on archive', dependsOn: war) << {
+   ant.signjar(jar: war.archivePath, alias:addon_sign_alias, storepass:addon_sign_password, keystore:addon_sign_keystore)
+}
+
+// have war tell you where the archive was put!
+war.doLast {
+   println "War created as ${war.archivePath}"
+}
+
+task wrapper(type: Wrapper) {
+    gradleVersion = '1.0-milestone-9'
+    jarFile = file('wrapper/gradle-wrapper.jar')
+    archiveBase = Wrapper.PathBase.GRADLE_USER_HOME
+}
+
+File pickServerDir() {
+  def serverDir = null;
+  def builder = new groovy.swing.SwingBuilder()
+  builder.registerBeanFactory('folderChooser', com.jidesoft.swing.FolderChooser)
+  builder.build {
+    frame(id: 'mainframe', title:'Pick Server Root Dir', defaultCloseOperation:JFrame.EXIT_ON_CLOSE, size:[440,440], locationRelativeTo: null, show: true) {
+      panel(border: emptyBorder(10)) {
+        boxLayout axis: BoxLayout.Y_AXIS
+        panel {
+          boxLayout axis: BoxLayout.X_AXIS
+           label text: '<html>In order to deploy the add-on to the server (and to run some tests), the build needs to know where the root directory of the server is located.</html>'
+        }
+        rigidArea size: new Dimension(0, 10)
+        panel {
+          boxLayout axis: BoxLayout.Y_AXIS
+           panel {
+             boxLayout axis: BoxLayout.X_AXIS
+             label text: 'Server root dir:'
+             hglue()
+           }
+          rigidArea size: new Dimension(0, 5)
+           panel {
+             boxLayout axis: BoxLayout.X_AXIS
+             folderChooser id: 'driverDirChooser', currentDirectory: new File('.'), navigationFieldVisible: false, controlButtonsAreShown: false, availableButtons: 0, recentListVisible: false
+             hglue()
+           }
+        }
+        rigidArea size: new Dimension(0, 10)
+        panel {
+          boxLayout axis: BoxLayout.X_AXIS
+          hglue()
+           button text: 'Accept', actionPerformed: {
+             serverDir = builder.driverDirChooser.selectedFolder
+             dispose()
+           }
+           hglue()
+           button text: 'Cancel', actionPerformed: {
+             dispose()
+           }
+          hglue()
+        }
+      }
+    }
+  }
+  // block until the gui is closed
+  while (builder.mainframe.isVisible()) {
+    Thread.sleep(100)
+  }
+  if (serverDir == null)
+    throw new GradleException("ERROR: Build cannot continue because the root directory of the server was not specified")
+  return serverDir
+}
+
+idea {
+  project {
+    //if you want to set specific jdk and language level
+    rootProject.afterEvaluate {
+       jdkName = "${rootProject.sourceCompatibility}"
+       languageLevel = "${rootProject.sourceCompatibility}"
+    }
+
+    ipr.withXml {
+      def node = it.asNode()
+
+      def vcsConfig = node.component.find { it.'@name' == 'VcsDirectoryMappings' }
+      vcsConfig.mapping[0].'@vcs' = 'Git'
+
+      def mgrNode = node.component.find { it.'@name' == 'ArtifactManager' }
+      if (!mgrNode)
+         mgrNode = node.appendNode('component', [name: 'ArtifactManager'])
+
+      def webNode = mgrNode?.artifact.find { it.'@name' == 'Add-On Web exploded' }
+      if (webNode)
+        mgrNode.remove(webNode)
+
+      mgrNode.append(new XmlParser().parseText("""
+        <artifact type="exploded-war" build-on-make="true" name="Add-On Web exploded">
+          <output-path>${pathFactory.relativePath('PROJECT_DIR', getDeployLoc()).relPath}</output-path>
+          <root id="root">
+            <element id="javaee-facet-resources" facet="${war.baseName}/web/Add-On Web" />
+            <element id="directory" name="WEB-INF">
+              <element id="directory" name="classes">
+                <element id="module-output" name="${war.baseName.toLowerCase()}" />
+              </element>
+              <element id="directory" name="lib" />
+            </element>
+          </root>
+        </artifact>
+      """))
+      def libNode = mgrNode.artifact.root.element.find { it.'@name' == 'WEB-INF' }.element.find { it.'@name' == 'lib' }
+      def userHome = new File(System.getProperty("user.home"))
+      modules[0].resolveDependencies().each { dep ->
+        if (dep instanceof org.gradle.plugins.ide.idea.model.ModuleLibrary)
+        {
+          if (dep.scope == 'COMPILE' || dep.scope == 'RUNTIME')
+            dep.classes.each {
+              libNode.appendNode('element', [id: 'file-copy', path: pathFactory.relativePath(userHome, '$USER_HOME$', it.file).relPath])
+            }
+        }
+      }
+      def jsLibs = modules[0].project.configurations.js.resolve()
+      if (!jsLibs.isEmpty())
+      {
+        def jsNode =  mgrNode.artifact.root.element.find { it.'@name' == jsDir }
+        if (!jsNode)
+          jsNode =  mgrNode.artifact.root[0].appendNode('element', [id: 'directory', name: jsDir])
+
+        jsLibs.each {
+          jsNode.appendNode('element', [id: 'file-copy', path: pathFactory.relativePath(userHome, '$USER_HOME$', it).relPath])
+        }
+      }
+    }
+  }
+
+  module {
+    scopes.PROVIDED.plus += configurations.providedCompile
+    scopes.PROVIDED.plus += configurations.providedRuntime
+    scopes.COMPILE.minus += configurations.providedCompile
+    scopes.RUNTIME.minus += configurations.providedRuntime
+
+    inheritOutputDirs = false
+    outputDir = file("$buildDir/classes/main")
+    testOutputDir = file("$buildDir/classes/test")
+
+    iml.withXml {
+      def node = it.asNode()
+
+      def mgrNode = node.component.find { it.'@name' == 'FacetManager' }
+      if (!mgrNode)
+         mgrNode = node.appendNode('component', [name: 'FacetManager'])
+      def webNode = mgrNode?.facet.find { it.'@name' == 'Add-On Web' }
+      if (webNode)
+        mgrNode.remove(webNode)
+
+      mgrNode.append(new XmlParser().parseText('''
+        <facet type="web" name="Add-On Web">
+          <configuration>
+            <descriptors>
+              <deploymentDescriptor name="web.xml" url="file://$MODULE_DIR$/src/main/webapp/WEB-INF/web.xml"/>
+            </descriptors>
+            <webroots>
+              <root url="file://$MODULE_DIR$/src/main/webapp" relative="/"/>
+            </webroots>
+            <sourceRoots>
+              <root url="file://$MODULE_DIR$/src/main/resources"/>
+              <root url="file://$MODULE_DIR$/src/main/java"/>
+            </sourceRoots>
+          </configuration>
+        </facet>
+      '''))
+    }
+  }
+}
+
+buildscript {
+    repositories { mavenRepo url: 'http://download.java.net/maven/2/' }
+    dependencies { classpath group: 'com.jidesoft', name: 'jide-oss', version: '2.9.0' }
+}
+
+// Support for info.xml
+class AddOnInfo {
+   def String name
+   def String description
+   def String version
+   def String vendor
+   def String systemMenuProvider
+
+   void info(Closure c) {
+      c.setDelegate(this)
+      c.setResolveStrategy Closure.DELEGATE_ONLY
+      c()
+   }
+
+   String propNameToXmlElementName(String propName)
+   {
+       // this converts a camelCase string to dash-separated all lower case string (i.e. camel-case)
+       propName.replaceAll('[A-Z]', { '-'+it.toLowerCase() })
+   }
+
+   Map getProperties() {
+      [ name:name, description:description, version:version, vendor:vendor, systemMenuProvider:systemMenuProvider ]
+   }
+}
+

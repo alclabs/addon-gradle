@@ -1,0 +1,28 @@
+apply plugin: 'maven'
+
+version = "1.0"
+group = "com.alcshare"
+
+repositories {
+    mavenCentral()
+}
+
+configurations { deployerJars }
+dependencies {
+   deployerJars "org.apache.maven.wagon:wagon-ftp:2.0"
+}
+
+
+uploadArchives {
+    repositories.mavenDeployer {
+        configuration = configurations.deployerJars
+        //repository(url: new File('build/repo').toURI().toURL()) // for testing out deployer changes
+        repository(url: 'ftp://alcshare.com') {
+           authentication(userName: "$addon_publish_user", password: "$addon_publish_password")
+        }
+    }
+}
+
+artifacts {
+   archives file('src/addon-gradle.gradle')
+}
