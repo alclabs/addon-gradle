@@ -34,16 +34,10 @@ task generateAddOnInfo {
       outputs.file addonInfoFile
    }
    doLast {
-      def addoninfo = project.convention.plugins.addoninfo
-      def props = addoninfo.properties
-      if (props.any { key, value -> value != null }) {
-         def text = '<extension version="1">\r\n'
-         props.each { key, value ->
-           if (value) {
-               def keyText = addoninfo.propNameToXmlElementName(key)
-               text += "  <$keyText>$value</$keyText>\r\n"
-           }
-         }
+      def propMap = project.convention.plugins.addoninfo.propMap
+      if (!propMap.isEmpty()) {
+         String text = '<extension version="1">\r\n'
+         propMap.each { key, value -> text += "  <$key>$value</$key>\r\n" }
          text += '</extension>'
 
          addonInfoFile.parentFile.mkdirs()
@@ -58,18 +52,19 @@ war {
    dependsOn generateAddOnInfo
    inputs.files addonInfoFile, 'LICENSE.txt'
 
-   if (extension == 'war')
-      extension = 'addon'
+   extension = 'addon'
 
    // lower-case'ify the war name to simplify usage in a web browser (which is case-sensitive)
    doFirst {
       archiveName = war.baseName.toLowerCase() + '.' + extension
    }
 
+   fileMode = 0644
    into('webapp') // put most stuff into the 'webapp' subdir
 
    // move the stuff that the War task puts into 'WEB-INF' to 'webapp/WEB-INF'
    copyAction.rootSpec.childSpecs.each {
+      it.fileMode = 0644
       if (it.destDir == 'WEB-INF')
          it.into('webapp/'+it.destDir)
    }
@@ -132,12 +127,12 @@ task cleanDeploy(description: 'Deletes the war from the webserver', overwrite: t
 cleanDeploy.doFirst { delete deploy.destDir }
 
 // task that builds and deploys the .war to the webserver
-task deploy(description: 'Deploys the war to the webserver', type: Sync, dependsOn:war) {
+task deploy(description: 'Deploys the war to the webserver', type: Sync, dependsOn:[sourceSets.main.runtimeClasspath, generateAddOnInfo]) {
    ext.destDir = getDeployLoc()
    doFirst {
       println "Deploying $war.baseName to ${ext.destDir.canonicalPath}"
    }
-   from { zipTree(war.archivePath) }
+   with war
    into { ext.destDir }
    fileMode = 0644
 }
@@ -322,7 +317,8 @@ class AddOnInfo {
    def String description
    def String version
    def String vendor
-   def String systemMenuProvider
+   def String systemMenuProvider // left for backwards compatibility
+   Map providers
 
    void info(Closure c) {
       c.setDelegate(this)
@@ -338,6 +334,23 @@ class AddOnInfo {
 
    Map getProperties() {
       [ name:name, description:description, version:version, vendor:vendor, systemMenuProvider:systemMenuProvider ]
+   }
+
+   private Map getPropMap() {
+      def map = [:]
+      if (name)
+         map[propNameToXmlElementName('name')] = name
+      if (description)
+         map[propNameToXmlElementName('description')] = description
+      if (version)
+         map[propNameToXmlElementName('version')] = version
+      if (vendor)
+         map[propNameToXmlElementName('vendor')] = vendor
+      if (systemMenuProvider)
+         map[propNameToXmlElementName('systemMenuProvider')] = systemMenuProvider
+
+      providers?.each { key, value -> map[propNameToXmlElementName(key+"Provider")] = value }
+      return map
    }
 }
 
