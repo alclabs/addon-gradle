@@ -26,6 +26,7 @@ configurations {
 }
 
 project.convention.plugins.addoninfo = new AddOnInfo()
+project.convention.plugins.addoninfo.addExtension('providers', new ProviderExtension())
 
 final addonInfoFile = new File(buildDir, 'tmp/war/info.xml')
 task generateAddOnInfo {
@@ -36,12 +37,13 @@ task generateAddOnInfo {
    doLast {
       def propMap = project.convention.plugins.addoninfo.propMap
       if (!propMap.isEmpty()) {
-         String text = '<extension version="1">\r\n'
-         propMap.each { key, value -> text += "  <$key>$value</$key>\r\n" }
-         text += '</extension>'
+         def text = new StringWriter()
+         new groovy.xml.MarkupBuilder(text).extension(version: 1) {
+             project.convention.plugins.addoninfo.addXml(delegate)
+         }
 
          addonInfoFile.parentFile.mkdirs()
-         addonInfoFile.text = text
+         addonInfoFile.text = text.toString()
       }
       else
          addonInfoFile.delete()
@@ -137,19 +139,38 @@ task deploy(description: 'Deploys the war to the webserver', type: Sync, depends
    fileMode = 0644
 }
 
-task signAddon(description: 'Signs the add-on archive', dependsOn: war) << {
-   ant.signjar(jar: war.archivePath, alias:addon_sign_alias, storepass:addon_sign_password, keystore:addon_sign_keystore)
-}
-
 // have war tell you where the archive was put!
 war.doLast {
    println "War created as ${war.archivePath}"
 }
 
-task wrapper(type: Wrapper) {
-    gradleVersion = '1.0-milestone-9'
-    jarFile = file('wrapper/gradle-wrapper.jar')
-    archiveBase = Wrapper.PathBase.GRADLE_USER_HOME
+// if needed, specify a special repo for the keystore
+if (hasProperty('addon_sign_repo')) {
+   repositories { mavenRepo(name:'keystore_repo', url:addon_sign_repo) }
+}
+
+// Allows add-on to request signing.  Only works for official add-ons.
+ext.signAddon = {
+   // add a task to perform the actual signing
+   task signArchive(description: 'Signs the add-on archive', dependsOn: war) << {
+      if (!project.hasProperty('addon_sign_keystore_gav') || !project.hasProperty('addon_sign_alias') || !project.hasProperty('addon_sign_password'))
+         println "Signing properties not defined, the built add-on will not be signed"
+      else
+      {
+         def keyDep = dependencies.create(addon_sign_keystore_gav)
+         def keystore = configurations.detachedConfiguration(keyDep).resolve().iterator().next()
+         ant.signjar(jar: war.archivePath, alias:addon_sign_alias, storepass:addon_sign_password, keystore:keystore.path)
+      }
+   }
+
+   // hook in the signArchive task to occur whenever a build is performed
+   project.afterEvaluate {
+       tasks['build'].dependsOn signArchive
+   }
+
+   // if signing, allow the add-on to specify it's own licensing requirements (including none).  This server
+   // will only honor this data if the add-on is signed with the valid private key.
+   project.convention.plugins.addoninfo.addExtension('licenseRequirements', new LicenseRequirementsExtension())
 }
 
 File pickServerDir() {
@@ -317,8 +338,7 @@ class AddOnInfo {
    def String description
    def String version
    def String vendor
-   def String systemMenuProvider // left for backwards compatibility
-   Map providers
+   Map extensions = [:]
 
    void info(Closure c) {
       c.setDelegate(this)
@@ -326,31 +346,86 @@ class AddOnInfo {
       c()
    }
 
-   String propNameToXmlElementName(String propName)
-   {
-       // this converts a camelCase string to dash-separated all lower case string (i.e. camel-case)
-       propName.replaceAll('[A-Z]', { '-'+it.toLowerCase() })
+   def addExtension(name, obj) {
+       extensions.put(name, obj)
+   }
+
+   // for backwards compatibility
+   def propertyMissing(String name, value) {
+      if (name == 'systemMenuProvider')
+         extensions.get('providers')?.systemMenu = value
+      else
+         throw new MissingPropertyException(name)
+   }
+
+   def methodMissing(String name, args) {
+      if (args[0] instanceof Closure)
+      {
+         def ext = extensions.get(name)
+         if (ext) {
+            args[0].setDelegate(ext)
+            args[0].setResolveStrategy Closure.DELEGATE_ONLY
+            return args[0].call()
+         }
+      }
+
+      throw new MissingMethodException(name, delegate, args)
    }
 
    Map getProperties() {
-      [ name:name, description:description, version:version, vendor:vendor, systemMenuProvider:systemMenuProvider ]
+      [ name:name, description:description, version:version, vendor:vendor,
+        extensions:extensions.collectEntries { key, value -> [(key) : value.getProperties()] }
+      ]
    }
 
    private Map getPropMap() {
       def map = [:]
       if (name)
-         map[propNameToXmlElementName('name')] = name
+         map['name'] = name
       if (description)
-         map[propNameToXmlElementName('description')] = description
+         map['description'] = description
       if (version)
-         map[propNameToXmlElementName('version')] = version
+         map['version'] = version
       if (vendor)
-         map[propNameToXmlElementName('vendor')] = vendor
-      if (systemMenuProvider)
-         map[propNameToXmlElementName('systemMenuProvider')] = systemMenuProvider
-
-      providers?.each { key, value -> map[propNameToXmlElementName(key+"Provider")] = value }
+         map['vendor'] = vendor
       return map
+   }
+
+   void addXml(root) {
+       propMap.each { key, value ->
+           root."$key" { root.mkp.yield(value) }
+       }
+       extensions.values().each { it.addXml(root) }
    }
 }
 
+// support for providers in info.xml
+class ProviderExtension {
+    Map providers = [:]
+
+    String propNameToXmlElementName(String propName)
+    {
+        // this converts a camelCase string to dash-separated all lower case string (i.e. camel-case)
+        propName.replaceAll('[A-Z]', { '-'+it.toLowerCase() }) + '-provider'
+    }
+
+    def propertyMissing(name, value) { providers.put(name, value); }
+    Map getProperties() { return providers; }
+    void addXml(root) {
+        providers.each { key, value ->
+            root."${propNameToXmlElementName(key)}" { root.mkp.yield(value) }
+        }
+    }
+}
+
+// support for license requirements in info.xml (only available if signing is requested
+class LicenseRequirementsExtension {
+    List features = []
+
+    Map getProperties() { return [features:features]; }
+    void addXml(root) {
+        root.'license-requirements' {
+           features.each { str -> feature { mkp.yield(str) } }
+        }
+    }
+}
