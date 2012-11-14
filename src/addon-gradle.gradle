@@ -35,18 +35,13 @@ task generateAddOnInfo {
       outputs.file addonInfoFile
    }
    doLast {
-      def propMap = project.convention.plugins.addoninfo.propMap
-      if (!propMap.isEmpty()) {
-         def text = new StringWriter()
-         new groovy.xml.MarkupBuilder(text).extension(version: 1) {
-             project.convention.plugins.addoninfo.addXml(delegate)
-         }
-
-         addonInfoFile.parentFile.mkdirs()
-         addonInfoFile.text = text.toString()
+      def text = new StringWriter()
+      new groovy.xml.MarkupBuilder(text).extension(version: 1) {
+          project.convention.plugins.addoninfo.addXml(delegate)
       }
-      else
-         addonInfoFile.delete()
+
+      addonInfoFile.parentFile.mkdirs()
+      addonInfoFile.text = text.toString()
    }
 }
 
