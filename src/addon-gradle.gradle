@@ -60,10 +60,11 @@ war {
    into('webapp') // put most stuff into the 'webapp' subdir
 
    // move the stuff that the War task puts into 'WEB-INF' to 'webapp/WEB-INF'
-   copyAction.rootSpec.childSpecs.each {
-      it.fileMode = 0644
-      if (it.destDir == 'WEB-INF')
-         it.into('webapp/'+it.destDir)
+   copyAction.rootSpec.includeEmptyDirs = false
+   copyAction.rootSpec.eachFile {
+      it.mode = 0644
+      if (it.path.startsWith('WEB-INF'))
+         it.path = 'webapp/'+it.path
    }
 
    // include addon-info.xml in binary
