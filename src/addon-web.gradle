@@ -1,0 +1,133 @@
+apply plugin: 'war'
+apply plugin: 'groovy'
+apply plugin: 'idea'
+apply plugin: 'eclipse'
+
+final jsDir = 'js'
+configurations {
+   js // used to specify javascript dependencies.  These are all put in 'jsDir' when the .war is built.
+}
+
+final projName = project.name
+rootProject.addon {
+   dependsOn build
+
+   into (projName) {
+      with(war)
+   }
+}
+
+war {
+   fileMode = 0644
+
+   // include javascript libraries
+   from (configurations.js) {
+       into jsDir
+   }
+}
+
+rootProject.build.dependsOn build
+war.enabled = false
+
+def projRef = project
+rootProject.idea {
+  project {
+
+    projRef.afterEvaluate {
+       jdkName = "${projRef.sourceCompatibility}"
+       languageLevel = "${projRef.sourceCompatibility}"
+    }
+
+    ipr.withXml {
+      def node = it.asNode()
+
+      def mgrNode = node.component.find { it.'@name' == 'ArtifactManager' }
+      if (!mgrNode)
+         mgrNode = node.appendNode('component', [name: 'ArtifactManager'])
+
+      def artifactName = 'Add-On '+projRef.name+' exploded'
+      def webNode = mgrNode.artifact.find { it.'@name' == artifactName }
+      if (webNode)
+        mgrNode.remove(webNode)
+
+      mgrNode.append(new XmlParser().parseText("""
+        <artifact type="exploded-war" build-on-make="true" name="$artifactName">
+          <output-path>${pathFactory.relativePath('PROJECT_DIR', new File(getDeployLoc(), projRef.name)).relPath}</output-path>
+          <root id="root">
+            <element id="javaee-facet-resources" facet="${projRef.name}/web/Add-On Web" />
+            <element id="directory" name="WEB-INF">
+              <element id="directory" name="classes">
+                <element id="module-output" name="${projRef.name}" />
+              </element>
+              <element id="directory" name="lib" />
+            </element>
+          </root>
+        </artifact>
+      """))
+      def artifactNode = mgrNode.artifact.find { it.'@name' == artifactName }
+      def libNode = artifactNode.root.element.find { it.'@name' == 'WEB-INF' }.element.find { it.'@name' == 'lib' }
+      def userHome = new File(System.getProperty("user.home"))
+      idea.module.resolveDependencies().each { dep ->
+        if (dep instanceof org.gradle.plugins.ide.idea.model.ModuleLibrary)
+        {
+          if (dep.scope == 'COMPILE' || dep.scope == 'RUNTIME')
+            dep.classes.each {
+              libNode.appendNode('element', [id: 'file-copy', path: pathFactory.relativePath(userHome, '$USER_HOME$', it.file).relPath])
+            }
+        }
+      }
+      def jsLibs = projRef.configurations.js.resolve()
+      if (!jsLibs.isEmpty())
+      {
+        def jsNode =  artifactNode.root.element.find { it.'@name' == jsDir }
+        if (!jsNode)
+          jsNode =  artifactNode.root[0].appendNode('element', [id: 'directory', name: jsDir])
+
+        jsLibs.each {
+          jsNode.appendNode('element', [id: 'file-copy', path: pathFactory.relativePath(userHome, '$USER_HOME$', it).relPath])
+        }
+      }
+    }
+  }
+}
+
+idea {
+  module {
+    scopes.PROVIDED.plus += configurations.providedCompile
+    scopes.PROVIDED.plus += configurations.providedRuntime
+    scopes.COMPILE.minus += configurations.providedCompile
+    scopes.RUNTIME.minus += configurations.providedRuntime
+
+    inheritOutputDirs = false
+    outputDir = file("$buildDir/classes/main")
+    testOutputDir = file("$buildDir/classes/test")
+
+    iml.withXml {
+      def node = it.asNode()
+
+      def mgrNode = node.component.find { it.'@name' == 'FacetManager' }
+      if (!mgrNode)
+         mgrNode = node.appendNode('component', [name: 'FacetManager'])
+      def webNode = mgrNode?.facet.find { it.'@name' == 'Add-On Web' }
+      if (webNode)
+        mgrNode.remove(webNode)
+
+      mgrNode.append(new XmlParser().parseText('''
+        <facet type="web" name="Add-On Web">
+          <configuration>
+            <descriptors>
+              <deploymentDescriptor name="web.xml" url="file://$MODULE_DIR$/src/main/webapp/WEB-INF/web.xml"/>
+            </descriptors>
+            <webroots>
+              <root url="file://$MODULE_DIR$/src/main/webapp" relative="/"/>
+            </webroots>
+            <sourceRoots>
+              <root url="file://$MODULE_DIR$/src/main/resources"/>
+              <root url="file://$MODULE_DIR$/src/main/java"/>
+            </sourceRoots>
+          </configuration>
+        </facet>
+      '''))
+    }
+  }
+}

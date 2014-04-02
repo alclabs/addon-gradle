@@ -1,6 +1,6 @@
 apply plugin: 'maven'
 
-version = "1.2"
+version = "1.3"
 group = "com.alcshare"
 
 repositories {
@@ -20,9 +20,16 @@ uploadArchives {
         repository(url: 'ftp://alcshare.com') {
            authentication(userName: "$addon_publish_user", password: "$addon_publish_password")
         }
+        addFilter('main') { artifact, file -> artifact.name == 'addon-gradle' }
+        addFilter('root') { artifact, file -> artifact.name == 'addon-root' }
+        addFilter('java') { artifact, file -> artifact.name == 'addon-java' }
+        addFilter('web')  { artifact, file -> artifact.name == 'addon-web' }
     }
 }
 
 artifacts {
    archives file('src/addon-gradle.gradle')
+   archives file('src/addon-root.gradle')
+   archives file('src/addon-java.gradle')
+   archives file('src/addon-web.gradle')
 }

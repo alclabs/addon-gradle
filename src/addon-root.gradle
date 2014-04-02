@@ -1,35 +1,36 @@
 import javax.swing.*
 import java.awt.Dimension
 
-defaultTasks 'showGui'
-
-apply plugin: 'war'
-apply plugin: 'groovy'
 apply plugin: 'idea'
 apply plugin: 'eclipse'
 
-repositories {
-   mavenCentral()
+defaultTasks 'showGui'
 
-   // since JQuery is frequently used by add-ons, include their repo here as a convenience
-   mavenRepo (name: "JQuery", url: "http://code.jquery.com") {
-        pattern = "[module]-[revision](.[classifier]).[ext]"
+allprojects {
+   project.ext.jQueryRepo = {
+      repositories.ivy {
+         url "http://code.jquery.com"
+         layout "pattern", {
+            artifact "[module]-[revision](.[classifier]).[ext]"
+         }
+      }
    }
-   mavenRepo (name: "JQuery UI", url: "http://code.jquery.com/ui") {
-        pattern = "[revision]/[module](.[classifier]).[ext]"
+   project.ext.jQueryUIRepo = {
+      repositories.ivy {
+         url "http://code.jquery.com/ui"
+         layout "pattern", {
+            artifact "[revision]/[module](.[classifier]).[ext]"
+         }
+      }
    }
-}
-
-final jsDir = 'js'
-configurations {
-   js // used to specify javascript dependencies.  These are all put in 'jsDir' when the .war is built.
 }
 
 project.convention.plugins.addoninfo = new AddOnInfo()
 project.convention.plugins.addoninfo.addExtension('providers', new ProviderExtension())
 
-final addonInfoFile = new File(buildDir, 'tmp/war/info.xml')
+ext.addonInfoFile = file("$buildDir/tmp/addon/info.xml")
 task generateAddOnInfo {
+
    afterEvaluate {
       inputs.properties project.convention.plugins.addoninfo.properties
       outputs.file addonInfoFile
@@ -45,43 +46,26 @@ task generateAddOnInfo {
    }
 }
 
-war {
+task addon(description: "Produces the .addon file", type: Zip) {
    dependsOn generateAddOnInfo
    inputs.files addonInfoFile, 'LICENSE.txt'
 
+   destinationDir = file("$buildDir/lib")
+   baseName = project.name.toLowerCase()  // lower-case'ify the addon name to simplify usage in a web browser (which is case-sensitive)
    extension = 'addon'
-
-   // lower-case'ify the war name to simplify usage in a web browser (which is case-sensitive)
-   doFirst {
-      archiveName = war.baseName.toLowerCase() + '.' + extension
-   }
-
    fileMode = 0644
-   into('webapp') // put most stuff into the 'webapp' subdir
 
-   // move the stuff that the War task puts into 'WEB-INF' to 'webapp/WEB-INF'
-   copyAction.rootSpec.includeEmptyDirs = false
-   copyAction.rootSpec.eachFile {
-      it.mode = 0644
-      if (it.path.startsWith('WEB-INF'))
-         it.path = 'webapp/'+it.path
-   }
+   from(addonInfoFile)   // include addon-info.xml in binary
+   from('LICENSE.txt')   // include license in binary
 
-   // include addon-info.xml in binary
-   copyAction.rootSpec.into('') {
-      from(addonInfoFile)
-   }
-
-   // include license in binary
-   from('LICENSE.txt') {
-       into 'WEB-INF'
-   }
-
-   // include javascript libraries
-   from(configurations.js) {
-       into jsDir
+   // have the build tell you where the archive was put!
+   doLast {
+      println "Addon created as ${addon.archivePath}"
    }
 }
+
+task build(dependsOn: addon)
+task clean(type: Delete) { delete buildDir }
 
 // not intended to be used directly.  This is the default task for the script.  This allows
 // the user to "double-click" on 'gradlew' and have the GUI launch.
@@ -118,43 +102,38 @@ Please set the serverRootDir property on the command line (-PserverRootDir=<dir>
 project.ext.set("getServerDir", {getServerDir()});
 
 // Helper methods to get the directory in which to deploy webapps (add-ons).
-File getDeployLoc() { new File(getServerDir(), 'addons/'+war.baseName.toLowerCase()) }
+ext.getDeployLoc = { new File(getServerDir(), 'addons/'+addon.baseName.toLowerCase()) }
 
 // task that deletes the .war (and exploded dir) from the webserver
 task cleanDeploy(description: 'Deletes the war from the webserver', overwrite: true, type:Delete)
 cleanDeploy.doFirst { delete deploy.destDir }
 
 // task that builds and deploys the .war to the webserver
-task deploy(description: 'Deploys the war to the webserver', type: Sync, dependsOn:[sourceSets.main.runtimeClasspath, generateAddOnInfo]) {
+task deploy(description: 'Deploys the war to the webserver', type: Sync, dependsOn:generateAddOnInfo) {
    ext.destDir = getDeployLoc()
    doFirst {
-      println "Deploying $war.baseName to ${ext.destDir.canonicalPath}"
+      println "Deploying $addon.baseName to ${ext.destDir.canonicalPath}"
    }
-   with war
+   with addon
    into { ext.destDir }
    fileMode = 0644
 }
 
-// have war tell you where the archive was put!
-war.doLast {
-   println "War created as ${war.archivePath}"
-}
-
 // if needed, specify a special repo for the keystore
 if (hasProperty('addon_sign_repo')) {
-   repositories { mavenRepo(name:'keystore_repo', url:addon_sign_repo) }
+   repositories { maven { url addon_sign_repo } }
 }
 
 // Allows add-on to request signing.  Only works for official add-ons.
 ext.signAddon = {
    // cannot sign jars with duplicate files, so make sure that doesn't happen
-   war {
+   addon {
       duplicatesStrategy = "exclude"
    }
 
    // add a task to perform the actual signing
    def requiredSigningProperties = ['addon_sign_keystore_gav', 'addon_sign_alias', 'addon_sign_password', 'addon_sign_keypass']
-   task signArchive(description: 'Signs the add-on archive', dependsOn: war) << {
+   task signArchive(description: 'Signs the add-on archive', dependsOn: addon) << {
       if (!requiredSigningProperties.every { project.hasProperty(it) })
       {
          println "All signing properties not defined, the built add-on will not be signed."
@@ -232,112 +211,19 @@ File pickServerDir() {
   return serverDir
 }
 
-def projRef = project
-rootProject.idea {
+idea {
   project {
-    //if you want to set specific jdk and language level
-    projRef.afterEvaluate {
-       jdkName = "${projRef.sourceCompatibility}"
-       languageLevel = "${projRef.sourceCompatibility}"
-    }
-
     ipr.withXml {
       def node = it.asNode()
 
       def vcsConfig = node.component.find { it.'@name' == 'VcsDirectoryMappings' }
       vcsConfig.mapping[0].'@vcs' = 'Git'
-
-      def mgrNode = node.component.find { it.'@name' == 'ArtifactManager' }
-      if (!mgrNode)
-         mgrNode = node.appendNode('component', [name: 'ArtifactManager'])
-
-      def webNode = mgrNode?.artifact.find { it.'@name' == 'Add-On Web exploded' }
-      if (webNode)
-        mgrNode.remove(webNode)
-
-      mgrNode.append(new XmlParser().parseText("""
-        <artifact type="exploded-war" build-on-make="true" name="Add-On Web exploded">
-          <output-path>${pathFactory.relativePath('PROJECT_DIR', new File(getDeployLoc(), 'webapp')).relPath}</output-path>
-          <root id="root">
-            <element id="javaee-facet-resources" facet="${war.baseName}/web/Add-On Web" />
-            <element id="directory" name="WEB-INF">
-              <element id="directory" name="classes">
-                <element id="module-output" name="${war.baseName}" />
-              </element>
-              <element id="directory" name="lib" />
-            </element>
-          </root>
-        </artifact>
-      """))
-      def libNode = mgrNode.artifact.root.element.find { it.'@name' == 'WEB-INF' }.element.find { it.'@name' == 'lib' }
-      def userHome = new File(System.getProperty("user.home"))
-      modules[0].resolveDependencies().each { dep ->
-        if (dep instanceof org.gradle.plugins.ide.idea.model.ModuleLibrary)
-        {
-          if (dep.scope == 'COMPILE' || dep.scope == 'RUNTIME')
-            dep.classes.each {
-              libNode.appendNode('element', [id: 'file-copy', path: pathFactory.relativePath(userHome, '$USER_HOME$', it.file).relPath])
-            }
-        }
-      }
-      def jsLibs = modules[0].project.configurations.js.resolve()
-      if (!jsLibs.isEmpty())
-      {
-        def jsNode =  mgrNode.artifact.root.element.find { it.'@name' == jsDir }
-        if (!jsNode)
-          jsNode =  mgrNode.artifact.root[0].appendNode('element', [id: 'directory', name: jsDir])
-
-        jsLibs.each {
-          jsNode.appendNode('element', [id: 'file-copy', path: pathFactory.relativePath(userHome, '$USER_HOME$', it).relPath])
-        }
-      }
-    }
-  }
-}
-
-idea {
-  module {
-    scopes.PROVIDED.plus += configurations.providedCompile
-    scopes.PROVIDED.plus += configurations.providedRuntime
-    scopes.COMPILE.minus += configurations.providedCompile
-    scopes.RUNTIME.minus += configurations.providedRuntime
-
-    inheritOutputDirs = false
-    outputDir = file("$buildDir/classes/main")
-    testOutputDir = file("$buildDir/classes/test")
-
-    iml.withXml {
-      def node = it.asNode()
-
-      def mgrNode = node.component.find { it.'@name' == 'FacetManager' }
-      if (!mgrNode)
-         mgrNode = node.appendNode('component', [name: 'FacetManager'])
-      def webNode = mgrNode?.facet.find { it.'@name' == 'Add-On Web' }
-      if (webNode)
-        mgrNode.remove(webNode)
-
-      mgrNode.append(new XmlParser().parseText('''
-        <facet type="web" name="Add-On Web">
-          <configuration>
-            <descriptors>
-              <deploymentDescriptor name="web.xml" url="file://$MODULE_DIR$/src/main/webapp/WEB-INF/web.xml"/>
-            </descriptors>
-            <webroots>
-              <root url="file://$MODULE_DIR$/src/main/webapp" relative="/"/>
-            </webroots>
-            <sourceRoots>
-              <root url="file://$MODULE_DIR$/src/main/resources"/>
-              <root url="file://$MODULE_DIR$/src/main/java"/>
-            </sourceRoots>
-          </configuration>
-        </facet>
-      '''))
     }
   }
 }
 
 buildscript {
-    repositories { mavenRepo url: 'http://download.java.net/maven/2/' }
+    repositories { maven { url 'http://download.java.net/maven/2/' } }
     dependencies { classpath group: 'com.jidesoft', name: 'jide-oss', version: '2.9.0' }
 }
 

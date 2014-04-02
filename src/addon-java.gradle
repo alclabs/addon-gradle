@@ -1,0 +1,89 @@
+apply plugin: 'java'
+apply plugin: 'groovy'
+apply plugin: 'idea'
+apply plugin: 'eclipse'
+
+configurations {
+   providedCompile // used to describe compile dependencies that should not be bundled into the .addon
+   compile.extendsFrom providedCompile
+
+   providedRuntime // used to describe runtime dependencies that should not be bundled into the .addon
+   runtime.extendsFrom providedRuntime
+}
+
+final projName = project.name
+rootProject.addon {
+   inputs.files sourceSets.main.output
+
+   into (projName+"/classes") {
+      from sourceSets.main.output
+   }
+   into (projName+"/lib") {
+      from configurations.compile + configurations.runtime - configurations.providedCompile - configurations.providedRuntime
+   }
+}
+
+rootProject.build.dependsOn build
+jar.enabled = false
+
+def projRef = project
+rootProject.idea {
+  project {
+
+    projRef.afterEvaluate {
+       jdkName = "${projRef.sourceCompatibility}"
+       languageLevel = "${projRef.sourceCompatibility}"
+    }
+
+    ipr.withXml {
+      def node = it.asNode()
+
+      def mgrNode = node.component.find { it.'@name' == 'ArtifactManager' }
+      if (!mgrNode)
+         mgrNode = node.appendNode('component', [name: 'ArtifactManager'])
+
+      def artifactName = 'Add-On '+projRef.name+' exploded'
+      def webNode = mgrNode?.artifact.find { it.'@name' == artifactName }
+      if (webNode)
+        mgrNode.remove(webNode)
+
+      mgrNode.append(new XmlParser().parseText("""
+        <artifact type="exploded-war" build-on-make="true" name="$artifactName">
+          <output-path>${pathFactory.relativePath('PROJECT_DIR', new File(getDeployLoc(), projRef.name)).relPath}</output-path>
+          <root id="root">
+            <element id="directory" name="classes">
+               <element id="module-output" name="${projRef.name}" />
+            </element>
+            <element id="directory" name="lib" />
+          </root>
+        </artifact>
+      """))
+      def artifactNode = mgrNode.artifact.find { it.'@name' == artifactName }
+      def libNode = artifactNode.root.element.find { it.'@name' == 'lib' }
+      def userHome = new File(System.getProperty("user.home"))
+      idea.module.resolveDependencies().each { dep ->
+        if (dep instanceof org.gradle.plugins.ide.idea.model.ModuleLibrary)
+        {
+          if (dep.scope == 'COMPILE' || dep.scope == 'RUNTIME')
+            dep.classes.each {
+              libNode.appendNode('element', [id: 'file-copy', path: pathFactory.relativePath(userHome, '$USER_HOME$', it.file).relPath])
+            }
+        }
+      }
+
+    }
+  }
+}
+
+idea {
+  module {
+    scopes.PROVIDED.plus += configurations.providedCompile
+    scopes.PROVIDED.plus += configurations.providedRuntime
+    scopes.COMPILE.minus += configurations.providedCompile
+    scopes.RUNTIME.minus += configurations.providedRuntime
+
+    inheritOutputDirs = false
+    outputDir = file("$buildDir/classes/main")
+    testOutputDir = file("$buildDir/classes/test")
+  }
+}
