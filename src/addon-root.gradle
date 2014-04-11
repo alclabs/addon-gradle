@@ -50,7 +50,7 @@ task addon(description: "Produces the .addon file", type: Zip) {
    dependsOn generateAddOnInfo
    inputs.files addonInfoFile, 'LICENSE.txt'
 
-   destinationDir = file("$buildDir/lib")
+   destinationDir = file("$buildDir/libs")
    baseName = project.name.toLowerCase()  // lower-case'ify the addon name to simplify usage in a web browser (which is case-sensitive)
    extension = 'addon'
    fileMode = 0644
