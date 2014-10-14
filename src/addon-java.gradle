@@ -66,7 +66,7 @@ rootProject.idea {
         {
           if (dep.scope == 'COMPILE' || dep.scope == 'RUNTIME')
             dep.classes.each {
-              libNode.appendNode('element', [id: 'file-copy', path: pathFactory.relativePath(userHome, '$USER_HOME$', it.file).relPath])
+              libNode.appendNode('element', [id: 'file-copy', path: pathFactory.resolvePath(userHome, '$USER_HOME$', it.file).relPath])
             }
         }
       }
@@ -77,10 +77,10 @@ rootProject.idea {
 
 idea {
   module {
-    scopes.PROVIDED.plus += configurations.providedCompile
-    scopes.PROVIDED.plus += configurations.providedRuntime
-    scopes.COMPILE.minus += configurations.providedCompile
-    scopes.RUNTIME.minus += configurations.providedRuntime
+    scopes.PROVIDED.plus += [configurations.providedCompile]
+    scopes.PROVIDED.plus += [configurations.providedRuntime]
+    scopes.COMPILE.minus += [configurations.providedCompile]
+    scopes.RUNTIME.minus += [configurations.providedRuntime]
 
     inheritOutputDirs = false
     outputDir = file("$buildDir/classes/main")
