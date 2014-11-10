@@ -150,7 +150,7 @@ if (hasProperty('addon_sign_repo')) {
 // Allows add-on to request signing.  Only works for official add-ons.
 ext.signAddon = {
    // cannot sign jars with duplicate files, so make sure that doesn't happen
-   war {
+   addon {
       duplicatesStrategy = "exclude"
    }
 
@@ -167,7 +167,7 @@ ext.signAddon = {
       {
          def keyDep = dependencies.create(addon_sign_keystore_gav)
          def keystore = configurations.detachedConfiguration(keyDep).resolve().iterator().next()
-         ant.signjar(jar: war.archivePath, alias:addon_sign_alias, storepass:addon_sign_password, keystore:keystore.path, keypass:addon_sign_keypass)
+         ant.signjar(jar: addon.archivePath, alias:addon_sign_alias, storepass:addon_sign_password, keystore:keystore.path, keypass:addon_sign_keypass)
       }
    }
 
