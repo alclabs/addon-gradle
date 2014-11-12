@@ -420,26 +420,27 @@ class ProviderExtension {
         propName.replaceAll('[A-Z]', { '-'+it.toLowerCase() }) + '-provider'
     }
 
-    def propertyMissing(name, value) { providers.put(name, value); }
+    def propertyMissing(name, value) { providers.put(name, value) }
     Map getProperties() { return providers; }
     void addXml(root) {
-        providers.each { key, value ->
+        providers.each { String key, value ->
             root."${propNameToXmlElementName(key)}" { root.mkp.yield(value) }
         }
     }
 }
 
-// support for license requirements in info.xml (only available if signing is requested
+// support for license requirements in info.xml (only available if signing is requested)
 class LicenseRequirementsExtension {
-    List features = []
-    Closure markup = {}
+    Map entries = [:]
 
-    Map getProperties() { return [features:features]; }
+    def methodMissing(String name, args) { entries.put(name, args) }
+    Map getProperties() { [entries: entries] }
     void addXml(root) {
         root.'license-requirements' {
-           features.each { str -> feature { mkp.yield(str) } }
-           markup.delegate = root
-           markup();
+            def xmlNode = delegate
+            entries.each { name, args ->
+                xmlNode.invokeMethod(name, args)
+            }
         }
     }
 }
