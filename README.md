@@ -1,15 +1,19 @@
 ALClabs-gradle
 ==============
 
-This project contains the shared part of the [gradle](http://www.gradle.org) build file used for
-many of the ALClabs WebCTRL add-on web application projects.
+This project contains the shared part of the [gradle](http://www.gradle.org) build file used to simplify building and deploying addons for WebCtrl.
 
-To use this, include the following in the header of your gradle build file.
+To use this, create a gradle project in your IDE and  include the following in the header of your gradle build file (before your project's info and dependencies)
+```
         configurations { gradleScript }
-        repositories { mavenRepo urls: 'http://repo.alcshare.com' }
-        dependencies { gradleScript group: 'com.alcshare', name: 'addon-gradle', ext: 'gradle', version: '1.0.1' }
+        repositories { 
+            maven { url: 'http://repo.alcshare.com'} 
+        }
+        dependencies { 
+            gradleScript group: 'com.alcshare', name: 'addon-gradle', ext: 'gradle', version: '1.7' 
+        }
         apply from: configurations.gradleScript.resolve().iterator().next()
-
+```
 This shared gradle file includes:
 
 *   plugin war
