@@ -1,3 +1,6 @@
+// This version works with gradle 7.3.3 and JDK 11
+// Note ivy is commented out for repo get if Jquery 
+// Note cleanDeploy is commented out
 import javax.swing.*
 import java.awt.Dimension
 
