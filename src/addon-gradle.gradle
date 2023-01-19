@@ -1,3 +1,4 @@
+// This version works with gradle 2.0 and JDK 8
 import javax.swing.*
 import java.awt.Dimension
 
@@ -9,7 +10,8 @@ apply plugin: 'idea'
 apply plugin: 'eclipse'
 
 repositories {
-   mavenCentral()
+    maven { url "https://repo.maven.apache.org/maven2" }
+   //mavenCentral()
 
    // since JQuery & JQueryUI are frequently used by add-ons, include their repo here as a convenience
    ivy {
@@ -339,7 +341,10 @@ idea {
 }
 
 buildscript {
-    repositories { mavenCentral() }
+    repositories { 
+        maven { url "https://repo.maven.apache.org/maven2" }
+	    //mavenCentral() 
+	}
     dependencies { classpath group: 'com.jidesoft', name: 'jide-oss', version: '2.9.0' }
 }
 
