@@ -4,8 +4,7 @@ version = "1.7.2"
 group = "com.alcshare"
 
 repositories {
-    maven { url "https://repo.maven.apache.org/maven2" }
-   //mavenCentral()
+    mavenCentral()
 }
 
 configurations { deployerJars }
