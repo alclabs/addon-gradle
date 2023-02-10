@@ -21,7 +21,6 @@ boolean includeJquery()
 if( includeJquery() )
 {
    repositories {
-       //maven { url "https://repo.maven.apache.org/maven2" }
        mavenCentral()
 
        // since JQuery & JQueryUI are frequently used by add-ons, include their repo here as a convenience
@@ -365,7 +364,6 @@ buildscript {
         project.ext.defineBuildScriptRepositories( repositories )
     else
         repositories { 
-          //maven { url "https://repo.maven.apache.org/maven2" }
           mavenCentral() 
           }
 

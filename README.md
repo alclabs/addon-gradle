@@ -7,10 +7,13 @@ To use this, create a gradle project in your IDE and  include the following in t
 ```
         configurations { gradleScript }
         repositories { 
-            maven { url: 'http://repo.alcshare.com'} 
+		    // Used for gradle 2 and before
+            // maven { url: 'http://repo.alcshare.com'} 
+			// New for gradle 7 and higher
+			maven { url 'http://repo.alcshare.com' allowInsecureProtocol=true } 
         }
         dependencies { 
-            gradleScript group: 'com.alcshare', name: 'addon-gradle', ext: 'gradle', version: '1.7' 
+            gradleScript group: 'com.alcshare', name: 'addon-gradle', ext: 'gradle', version: '2.0.1' 
         }
         apply from: configurations.gradleScript.resolve().iterator().next()
 ```
