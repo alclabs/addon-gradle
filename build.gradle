@@ -1,6 +1,6 @@
-apply plugin: 'maven'
+apply plugin: 'maven-publish'
 
-version = "1.7.2"
+version = "2.0.1"
 group = "com.alcshare"
 
 repositories {
@@ -14,24 +14,39 @@ dependencies {
    deployerJars "org.apache.maven.wagon:wagon-ftp:2.0"
 }
 
+publishing {
+   repositories {
+       maven {
+          //url uri("${buildDir}/build/repo")   // for testing purposes
 
-uploadArchives {
-    repositories.mavenDeployer {
-        configuration = configurations.deployerJars
-        //repository(url: new File('build/repo').toURI().toURL()) // for testing out deployer changes
-        repository(url: 'ftp://alcshare.com') {
-           authentication(userName: "$addon_publish_user", password: "$addon_publish_password")
-        }
-        addFilter('main') { artifact, file -> artifact.name == 'addon-gradle' }
-        addFilter('root') { artifact, file -> artifact.name == 'addon-root' }
-        addFilter('java') { artifact, file -> artifact.name == 'addon-java' }
-        addFilter('web')  { artifact, file -> artifact.name == 'addon-web' }
-    }
-}
-
-artifacts {
-   archives file('src/addon-gradle.gradle')
-   archives file('src/addon-root.gradle')
-   archives file('src/addon-java.gradle')
-   archives file('src/addon-web.gradle')
+          url 'ftp://alcshare.com'
+	      credentials {
+	        userName "$addon_publish_user"
+	        password "$addon_publish_password"
+	      }
+	   }
+   }
+   
+   publications {
+      addongradle(MavenPublication) {
+		  artifact([source: 'src/addon-gradle.gradle', extension: 'gradle']) {
+		    artifactId 'addon-gradle'
+		  }
+ 	  }
+      addonroot(MavenPublication) {
+		  artifact([source: 'src/addon-root.gradle', extension: 'gradle']) {
+		     artifactId 'addon-root'
+		  }
+ 	  }
+      addonjava(MavenPublication) {
+		  artifact([source: 'src/addon-java.gradle', extension: 'gradle']) {
+		    artifactId 'addon-java'
+		  }
+ 	  }
+      addonweb(MavenPublication) {
+		  artifact([source: 'src/addon-web.gradle', extension: 'gradle']) {
+		     artifactId = 'addon-web'
+		  }
+ 	  }
+   }
 }

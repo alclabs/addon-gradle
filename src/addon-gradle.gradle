@@ -1,4 +1,6 @@
-// This version works with gradle 2.0 and JDK 8
+// This version works with gradle 7.3.3 and JDK 11
+// Note ivy is commented out for repo get if Jquery 
+// Note cleanDeploy is commented out
 import javax.swing.*
 import java.awt.Dimension
 
@@ -8,24 +10,35 @@ apply plugin: 'war'
 apply plugin: 'groovy'
 apply plugin: 'idea'
 apply plugin: 'eclipse'
+apply plugin:'base'
 
-repositories {
-    maven { url "https://repo.maven.apache.org/maven2" }
-   //mavenCentral()
+boolean includeJquery()
+{
+   return !project.ext.has( "excludeJquery" ) ||
+           !"true".equals( project.ext.excludeJquery )
+}
 
-   // since JQuery & JQueryUI are frequently used by add-ons, include their repo here as a convenience
-   ivy {
-      url "http://code.jquery.com"
-      layout "pattern", {
-         artifact "[module]-[revision](.[classifier]).[ext]"
-      }
-   }
-   ivy {
-      url "http://code.jquery.com/ui"
-      layout "pattern", {
-         artifact "[revision]/[module](.[classifier]).[ext]"
-      }
-   }
+if( includeJquery() )
+{
+   repositories {
+       mavenCentral()
+
+       // since JQuery & JQueryUI are frequently used by add-ons, include their repo here as a convenience
+       /*
+       ivy {
+         url "http://code.jquery.com"
+          layout "pattern", {
+            artifact "[module]-[revision](.[classifier]).[ext]"
+        }
+        }
+        ivy {
+          url "http://code.jquery.com/ui"
+         layout "pattern", {
+           artifact "[revision]/[module](.[classifier]).[ext]"
+        }
+        }
+      */  
+    }
 }
 
 final jsDir = 'js'
@@ -57,9 +70,13 @@ task addon(description: "Produces the .addon file", type: Zip) {
    dependsOn generateAddOnInfo, war
    inputs.files addonInfoFile, 'LICENSE.txt'
 
-   destinationDir = file("$buildDir/libs")
-   baseName = project.name.toLowerCase()  // lower-case'ify the addon name to simplify usage in a web browser (which is case-sensitive)
-   extension = 'addon'
+   //destinationDir = file("$buildDir/libs")
+   //baseName = project.name.toLowerCase().replace( " ", "_" )  // lower-case'ify the addon name to simplify usage in a web browser (which is case-sensitive)
+   //extension = 'addon'
+   // property names changed for readiness for gradle 8.0
+   destinationDirectory = file("$buildDir/libs")
+   archiveBaseName = project.name.toLowerCase().replace( " ", "_" )  // lower-case'ify the addon name to simplify usage in a web browser (which is case-sensitive)
+   archiveExtension = 'addon'
    fileMode = 0644
 
    from(addonInfoFile)   // include addon-info.xml in binary
@@ -89,13 +106,14 @@ war {
 
 // not intended to be used directly.  This is the default task for the script.  This allows
 // the user to "double-click" on 'gradlew' and have the GUI launch.
-task showGui(description: 'Starts a graphical user interface for the build') << {
+task showGui(description: 'Starts a graphical user interface for the build') { doLast {
    org.gradle.gradleplugin.userinterface.swing.standalone.BlockingApplication.launchAndBlock();
+}
 }
 
 // Helper method to get the installation root directory of the server.  This method will either
 // return whatever is in the 'serverRootDir' property (if it's set) ...
-File getServerDir() {
+File determineServerDir() {
    if (!project.ext.has("serverRootDir"))
       project.ext.set("serverRootDir", null);
    if (project.ext.serverRootDir == null) {
@@ -119,14 +137,14 @@ Please set the serverRootDir property on the command line (-PserverRootDir=<dir>
    }
    return new File(project.ext.serverRootDir)
 }
-project.ext.set("getServerDir", {getServerDir()});
+project.ext.set("getServerDir", {determineServerDir()});
 
 // Helper methods to get the directory in which to deploy webapps (add-ons).
 File getDeployLoc() { new File(getServerDir(), 'addons/'+war.baseName.toLowerCase()) }
 
 // task that deletes the .war (and exploded dir) from the webserver
-task cleanDeploy(description: 'Deletes the war from the webserver', overwrite: true, type:Delete)
-cleanDeploy.doFirst { delete deploy.destDir }
+//task cleanDeploy(description: 'Deletes the war from the webserver', overwrite: true, type:Delete)
+//cleanDeploy.doFirst { delete deploy.destDir }
 
 // task that builds and deploys the .war to the webserver
 task deploy(description: 'Deploys the war to the webserver', type: Sync, dependsOn:[sourceSets.main.runtimeClasspath, generateAddOnInfo]) {
@@ -134,10 +152,10 @@ task deploy(description: 'Deploys the war to the webserver', type: Sync, depends
    doFirst {
       println "Deploying $war.baseName to ${ext.destDir.canonicalPath}"
    }
-   with addon
+            with addon
    into { ext.destDir }
-   fileMode = 0644
-}
+            fileMode = 0644
+        }
 
 // have war tell you where the archive was put!
 war.doLast {
@@ -341,10 +359,12 @@ idea {
 }
 
 buildscript {
-    repositories { 
-        maven { url "https://repo.maven.apache.org/maven2" }
-	    //mavenCentral() 
-	}
+    if( project.hasProperty( 'defineBuildScriptRepositories' ) )
+        project.ext.defineBuildScriptRepositories( repositories )
+    else
+        repositories { 
+          mavenCentral() 
+          }
     dependencies { classpath group: 'com.jidesoft', name: 'jide-oss', version: '2.9.0' }
 }
 
@@ -355,6 +375,7 @@ class AddOnInfo {
    def String version
    def String vendor
    Map extensions = [:]
+   def supportedApplications = []
 
    void info(Closure c) {
       c.setDelegate(this)
@@ -389,10 +410,33 @@ class AddOnInfo {
    }
 
    Map getProperties() {
-      [ name:name, description:description, version:version, vendor:vendor,
-        extensions:extensions.collectEntries { key, value -> [(key) : value.getProperties()] }
-      ]
+       Map properties =
+          [ name:name, description:description, version:version, vendor:vendor,
+            extensions:extensions.collectEntries { key, value -> [(key) : value.getProperties()] },
+          ]
+
+      addSupportedApplicationsToMap( properties )
+
+      return properties;
    }
+
+    /**
+     * This handles specifying supported applications -- as we now have more than just WebCTRL
+     * add-ons. This was introduced in a WebCTRL 6.5 patch but needs to be backward compatible.
+     * To handle this, if you don't specify anything in supportedApplications, this will generate
+     * the same info.xml as it always did (which means WebCTRL will assume that webserver is the
+     * only supported application). If however, you specify anything in supportedApplications,
+     * then you must specify ALL applications you support.
+     */
+    private void addSupportedApplicationsToMap( Map properties )
+    {
+        if( supportedApplications.isEmpty() )
+            return;
+
+        supportedApplications.each {
+            properties.put( it, 'supported' )
+        }
+    }
 
    private Map getPropMap() {
       def map = [:]
@@ -412,6 +456,22 @@ class AddOnInfo {
            root."$key" { root.mkp.yield(value) }
        }
        extensions.values().each { it.addXml(root) }
+
+       addSupportedApplicationsXml( root )
+   }
+
+   //see addSupportedApplicationsToMap. Same concept.
+   def addSupportedApplicationsXml( root )
+   {
+       if( supportedApplications.isEmpty() )
+           return;
+
+       root.supports {
+           def supportedElement = delegate;
+           supportedApplications.each { app ->
+               supportedElement.application( "${app}" )
+           }
+       }
    }
 }
 
