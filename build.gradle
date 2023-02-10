@@ -19,12 +19,12 @@ publishing {
        maven {
           //url uri("${buildDir}/build/repo")   // for testing purposes
 
-          url 'ftp://alcshare.com'
+          url "ftp://alcshare.com"
 	      credentials {
-	        userName "$addon_publish_user"
-	        password "$addon_publish_password"
+	         username "$addon_publish_user"
+	         password "$addon_publish_password"
 	      }
-	   }
+      }
    }
    
    publications {
