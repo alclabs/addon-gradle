@@ -27,14 +27,6 @@ publishing {
        maven {
           url uri("${buildDir}/build/repo")   // used to place the publish results locally before moved to FTP
 
-<<<<<<< Updated upstream
-          url 'ftp://alcshare.com'
-	      credentials {
-	        userName "$addon_publish_user"
-	        password "$addon_publish_password"
-	      }
-	   }
-=======
 //  NOTE: Gradle no longer supports FTP
 //          url "ftp://alcshare.com"
 //	      credentials {
@@ -42,7 +34,6 @@ publishing {
 //	         password "$addon_publish_password"
 //	      }
       }
->>>>>>> Stashed changes
    }
    
    publications {
