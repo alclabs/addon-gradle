@@ -1,6 +1,6 @@
 apply plugin: 'maven-publish'
 
-version = "2.0.1"
+version = "2.0.2"
 group = "com.alcshare"
 
 repositories {
@@ -9,21 +9,32 @@ repositories {
 	 }
 }
 
-configurations { deployerJars }
-dependencies {
-   deployerJars "org.apache.maven.wagon:wagon-ftp:2.0"
+configurations 
+{ 
+   ftpAntTask
 }
 
+dependencies 
+{
+   ftpAntTask("org.apache.ant:ant-commons-net:1.8.4") {
+       module("commons-net:commons-net:1.4.1") {
+          dependencies "oro:oro:2.0.8.jar"
+       }
+   }
+}
+
+// Creates the publish files locally
 publishing {
    repositories {
        maven {
-          //url uri("${buildDir}/build/repo")   // for testing purposes
+          url uri("${buildDir}/build/repo")   // used to place the publish results locally before moved to FTP
 
-          url "ftp://alcshare.com"
-	      credentials {
-	         username "$addon_publish_user"
-	         password "$addon_publish_password"
-	      }
+//  NOTE: Gradle no longer supports FTP
+//          url "ftp://alcshare.com"
+//	      credentials {
+//	         username "$addon_publish_user"
+//	         password "$addon_publish_password"
+//	      }
       }
    }
    
@@ -50,3 +61,41 @@ publishing {
  	  }
    }
 }
+
+
+/* Modify gradle.properties to define your properties for the FTP Site 
+   Here is an example:
+        addon_publish_user=ltribble
+        addon_publish_password=ftpin
+        addon_publish_site=ftp.alcshare.com   //192.168.10.102
+        addon_publish_port=21                 //8021
+*/
+ant.username = "$addon_publish_user"
+ant.password = "$addon_publish_password"
+ant.versiondir = "/com/alcshare/addon-gradle/${project.version}"
+ant.fileset= "${project.buildDir}/build/repo/"+ant.versiondir
+ant.ftpsite="$addon_publish_site"
+ant.ftpport ="$addon_publish_port"
+
+// Ant task to copy the published files to the FTP Site
+tasks.register('publishToFtp')
+{
+  description("Publish and copy files to ALCShare FTP site")
+  dependsOn( 'publish' )
+  doLast{
+  ant 
+  {
+     taskdef(name: 'ftp',
+          classname: 'org.apache.tools.ant.taskdefs.optional.net.FTP',
+          classpath: configurations.ftpAntTask.asPath)
+
+     ftp(server: ftpsite, port: ftpport, userid: username, password: password, action: "mkdir", remoteDir: versiondir ) 
+
+     ftp(server: ftpsite, port: ftpport, userid: username, password: password, remoteDir: versiondir ) 
+     {
+         fileset(dir: fileset) 
+     }
+   }
+  }
+}
+
